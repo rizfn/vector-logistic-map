@@ -93,7 +93,7 @@ epsilonGroup.append("label").text("ε");
 epsilonGroup.append("input")
   .attr("type", "range")
   .attr("min", 0)
-  .attr("max", 0.25)
+  .attr("max", 1.1)
   .attr("step", 0.01)
   .attr("value", epsilon)
   .attr("id", "epsilonSlider")
@@ -102,6 +102,70 @@ epsilonGroup.append("input")
     d3.select("#epsilonVal").text(epsilon);
   });
 epsilonGroup.append("span").attr("id", "epsilonVal").text(epsilon);
+
+// Brush controls
+const brushBtn = controls.append("button")
+  .attr("title", "Brush")
+  .style("background", "none")
+  .style("border", "none")
+  .style("cursor", "pointer")
+  .style("padding", "8px")
+  .style("font-size", "2.5em")
+  .text("🖌");
+
+const brushSizeGroup = controls.append("div")
+  .style("display", "flex")
+  .style("flex-direction", "column")
+  .style("align-items", "center")
+  .style("gap", "8px")
+  .style("visibility", "hidden");
+brushSizeGroup.append("label").text("Brush Size");
+brushSizeGroup.append("input")
+  .attr("type", "range")
+  .attr("min", 1)
+  .attr("max", 50)
+  .attr("step", 1)
+  .attr("value", 10)
+  .attr("id", "brushSizeSlider")
+  .on("input", function() {
+    brushSize = +this.value;
+    d3.select("#brushSizeVal").text(brushSize);
+  });
+brushSizeGroup.append("span").attr("id", "brushSizeVal").text(10);
+
+const brushColorGroup = controls.append("div")
+  .style("display", "flex")
+  .style("flex-direction", "column")
+  .style("align-items", "center")
+  .style("gap", "8px")
+  .style("visibility", "hidden");
+brushColorGroup.append("label").text("Brush Value");
+brushColorGroup.append("input")
+  .attr("type", "range")
+  .attr("min", 0)
+  .attr("max", 1)
+  .attr("step", 0.01)
+  .attr("value", 0.5)
+  .attr("id", "brushColorSlider")
+  .on("input", function() {
+    brushValue = +this.value;
+    d3.select("#brushColorVal").text(brushValue.toFixed(2));
+    const color = d3.interpolateMagma(brushValue);
+    d3.select("#brushColorPreview").style("background-color", color);
+  });
+brushColorGroup.append("span").attr("id", "brushColorVal").text("0.50");
+brushColorGroup.append("div")
+  .attr("id", "brushColorPreview")
+  .style("width", "40px")
+  .style("height", "20px")
+  .style("background-color", d3.interpolateMagma(0.5))
+  .style("border", "1px solid #000");
+
+// Brush state
+let brushSize = 10;
+let brushValue = 0.5;
+let isDrawing = false;
+let brushEnabled = false;
 
 // Canvas column
 const canvasCol = container
@@ -122,6 +186,19 @@ const canvas = canvasCol
   .style("height", `${canvasDim}px`)
   .node();
 const ctx = canvas.getContext('2d');
+
+// Overlay canvas for brush preview
+const overlayCanvas = canvasCol
+  .append("canvas")
+  .attr("width", size)
+  .attr("height", size)
+  .style("width", `${canvasDim}px`)
+  .style("height", `${canvasDim}px`)
+  .style("position", "absolute")
+  .style("pointer-events", "none")
+  .style("display", "none")
+  .node();
+const overlayCtx = overlayCanvas.getContext('2d');
 
 // GPU.js setup
 const gpu = new GPU.GPU({ mode: 'gpu' });
@@ -146,8 +223,9 @@ const updateKernel = gpu.createKernel(function (lattice, alpha, epsilon) {
   const f_left = alpha * left * (1 - left);
   const f_right = alpha * right * (1 - right);
 
-  return (1 - 4 * epsilon) * f_self +
-         epsilon * (f_up + f_down + f_left + f_right);
+  // Each neighbor gets epsilon/4, self gets 1-epsilon
+  return (1 - epsilon) * f_self +
+         (epsilon / 4.0) * (f_up + f_down + f_left + f_right);
 })
 .setOutput([size, size])
 .setConstants({ size });
@@ -218,17 +296,84 @@ resetBtn.on("click", () => {
     draw(lattice);
 });
 
+// Brush button toggle
+brushBtn.on("click", () => {
+  brushEnabled = !brushEnabled;
+  d3.select(overlayCanvas).style("display", brushEnabled ? "block" : "none");
+  brushBtn.style("opacity", brushEnabled ? "1" : "0.5");
+  brushSizeGroup.style("visibility", brushEnabled ? "visible" : "hidden");
+  brushColorGroup.style("visibility", brushEnabled ? "visible" : "hidden");
+});
+
 // Initial draw
 draw(lattice);
 step();
 
+// Mouse interaction
+d3.select(canvas)
+  .on("mousedown", (event) => {
+    if (!brushEnabled) return;
+    isDrawing = true;
+    paintAt(event);
+  })
+  .on("mousemove", (event) => {
+    if (!brushEnabled) return;
+    drawBrushPreview(event);
+    if (isDrawing) paintAt(event);
+  })
+  .on("mouseup", () => {
+    if (!brushEnabled) return;
+    isDrawing = false;
+  })
+  .on("mouseleave", () => {
+    if (!brushEnabled) return;
+    isDrawing = false;
+    overlayCtx.clearRect(0, 0, size, size);
+  });
+
+function paintAt(event) {
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((event.clientX - rect.left) * size / canvasDim);
+  const y = Math.floor((event.clientY - rect.top) * size / canvasDim);
+  
+  for (let i = 0; i < size; i++) {
+    for (let j = 0; j < size; j++) {
+      const dx = i - y;
+      const dy = j - x;
+      if (dx * dx + dy * dy <= brushSize * brushSize) {
+        lattice[i][j] = brushValue;
+      }
+    }
+  }
+  draw(lattice);
+}
+
+function drawBrushPreview(event) {
+  overlayCtx.clearRect(0, 0, size, size);
+  const rect = canvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * size / canvasDim;
+  const y = (event.clientY - rect.top) * size / canvasDim;
+  
+  overlayCtx.strokeStyle = 'white';
+  overlayCtx.lineWidth = 2;
+  overlayCtx.beginPath();
+  overlayCtx.arc(x, y, brushSize, 0, 2 * Math.PI);
+  overlayCtx.stroke();
+}
+
 // Handle window resize
 window.addEventListener("resize", () => {
   canvasDim = getCanvasDim();
-    canvasCol.style("width", `${canvasDim}px`).style("height", `${canvasDim}px`);
-    canvas.style("width", `${canvasDim}px`).style("height", `${canvasDim}px`);
-    }
-);
+  canvasCol
+    .style("width", `${canvasDim}px`)
+    .style("height", `${canvasDim}px`);
+  d3.select(canvas)
+    .style("width", `${canvasDim}px`)
+    .style("height", `${canvasDim}px`);
+  d3.select(overlayCanvas)
+    .style("width", `${canvasDim}px`)
+    .style("height", `${canvasDim}px`);
+});
 
 // Initialize pause/play icon
 updatePausePlayIcon();
