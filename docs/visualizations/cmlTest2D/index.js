@@ -92,7 +92,7 @@ const epsilonGroup = controls.append("div")
 epsilonGroup.append("label").text("ε");
 epsilonGroup.append("input")
   .attr("type", "range")
-  .attr("min", 0)
+  .attr("min", -0.2)
   .attr("max", 1.1)
   .attr("step", 0.01)
   .attr("value", epsilon)
