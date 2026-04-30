@@ -201,7 +201,17 @@ const overlayCanvas = canvasCol
 const overlayCtx = overlayCanvas.getContext('2d');
 
 // GPU.js setup
-const gpu = new window.GPU.GPU({ mode: 'gpu' });
+// On macOS safari, use GPU instead of GPU.GPU to avoid "GPU is not a constructor" error
+
+var isMacLike = /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform);
+if (typeof GPU.GPU === 'undefined') {
+  console.warn("GPU.GPU is undefined, using GPU directly (Safari on macOS workaround)");
+  const gpu = new GPU();
+}
+else {
+  const gpu = new GPU.GPU();
+}
+
 const updateKernel = gpu.createKernel(function (lattice, alpha, epsilon) {
   const N = this.constants.size;
   const i = this.thread.y;
