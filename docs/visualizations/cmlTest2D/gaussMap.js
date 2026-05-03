@@ -209,7 +209,15 @@ const overlayCanvas = canvasCol
 const overlayCtx = overlayCanvas.getContext('2d');
 
 // GPU.js setup
-const gpu = new GPU.GPU({ mode: 'gpu' });
+const gpu = (() => {
+  try {
+    return new GPU.GPU();
+  } catch (e) {
+    console.warn("GPU.GPU constructor failed, falling back to GPU. This may be a workaround for Safari on macOS.");
+    return new GPU();
+  }
+})();
+
 const updateKernel = gpu.createKernel(function (lattice, b_param, epsilon) {
   const N = this.constants.size;
   const alpha_fixed = this.constants.alpha_fixed;
